@@ -136,6 +136,7 @@ pub struct Client<R, W> {
     next_id: u64,
     caps: Caps,
     calls: u64,
+    fail_after: Option<u64>,
 }
 
 impl<R: BufRead, W: Write> Client<R, W> {
@@ -146,7 +147,14 @@ impl<R: BufRead, W: Write> Client<R, W> {
             next_id: 0,
             caps: Caps::default(),
             calls: 0,
+            fail_after: None,
         }
+    }
+
+    /// Fault injection for tests: refuse every tool call after the first
+    /// `n`, as if the process died mid-import. Never set in normal runs.
+    pub fn fail_after(&mut self, n: Option<u64>) {
+        self.fail_after = n;
     }
 
     /// The caps in force (defaults until [`Self::initialize`] succeeds).
@@ -330,6 +338,12 @@ impl<R: BufRead, W: Write> Client<R, W> {
     /// `tools/call` `name`; returns the tool's JSON result (decoded from
     /// `content[0].text`).
     fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, WireError> {
+        if self.fail_after.is_some_and(|n| self.calls >= n) {
+            return Err(WireError::Protocol(format!(
+                "injected failure after {} tool calls (ENOLA_TO_GRAPH_TEST_FAIL_AFTER)",
+                self.calls
+            )));
+        }
         self.calls += 1;
         let response =
             self.request_raw("tools/call", json!({"name": name, "arguments": arguments}))?;

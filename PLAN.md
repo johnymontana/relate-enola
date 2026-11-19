@@ -1,8 +1,8 @@
 # enola-to-graph: implementation plan
 
-Status: rev 4 (2026-11-19). **Phase 0 complete (GO)**: findings in
+Status: rev 5 (2026-11-19). **Phase 0 complete (GO)**: findings in
 [`notes/enola-contract.md`](notes/enola-contract.md); revisions R1–R9 folded in.
-**Phase 1 complete**: results recorded under Phase 1. Next: Phase 2.
+**Phases 1 and 2 complete**: results recorded under each phase. Next: Phase 3.
 
 Repository: `github.com/johnymontana/relate-enola` (this directory). Not part of
 `relatedb/relate`. That repo's ADR, docs and release rules do not apply here.
@@ -139,8 +139,8 @@ Identity:
 | `:EnolaSource` | unique `source_key` | `source_kind` (repo, cluster, snapshot), display path, `--source-name` if any |
 | `:EnolaSnapshot` | unique `snapshot_key` | `source_key`, `snapshot_id`, `projection_version`, `enola_version`, `extractor_version`, facts digest, `raw_count`, `distinct_count`, `coverage_json` (`quality`), `provenance_json` (`git` or `members[]`), `imported_at` (excluded from comparisons). **Its existence is the completion marker.** |
 | `(:EnolaSource)-[:ENOLA_LATEST]->(:EnolaSnapshot)` | one per source | Moved in the same statement that creates the marker |
-| `:EnolaFact` | unique `(snapshot_key, enola_id)` | `source_key`, `kind`, `repo`, `name`, `repo_file` (`file` with exactly one `<repo>/` prefix removed when `repo_prefixed`; module `.` kept), `line`, `end_line`, `record_count`, `props_json` (always; deterministic). Promoted contract props when all records agree: `symbol_kind`, `module_role`, route `method`, `role`, `type`, `source`, `framework`, `unmatched_by_server`, `unmatched_reason`, `matched_by_clients`, `body_hash`. `raw_records` only when `record_count > 1` or records conflict (D6) |
-| `:EnolaRef` (D19) | unique `(snapshot_key, target)` | `source_key`, `target` (the exported name spelling). Never resolved by name matching |
+| `:EnolaFact` | unique `fact_key` = `<snapshot_key>/<enola_id>` (also stored: `snapshot_key`, `enola_id`) | `source_key`, `kind`, `repo`, `name`, `repo_file` (`file` with exactly one `<repo>/` prefix removed when `repo_prefixed`; module `.` kept), `line`, `end_line`, `record_count`, `props_json` (always; deterministic). Promoted contract props when all records agree: `symbol_kind`, `module_role`, route `method`, `role`, `type`, `source`, `framework`, `unmatched_by_server`, `unmatched_reason`, `matched_by_clients`, `body_hash`. `raw_records` only when `record_count > 1` or records conflict (D6) |
+| `:EnolaRef` (D19) | unique `ref_key` = `<snapshot_key>/<target>` | `source_key`, `target` (the exported name spelling). Never resolved by name matching |
 | Relations | deduplicated on `(source id, kind, target_id \| target)` | Static types: `ENOLA_DECLARES`, `ENOLA_IMPORTS`, `ENOLA_CALLS`, `ENOLA_IMPLEMENTS`, `ENOLA_DEPENDS_ON`, `ENOLA_INSTANTIATES`, `ENOLA_INJECTS`, `ENOLA_HAS_METHOD`, `ENOLA_HANDLED_BY`, `ENOLA_IMPLEMENTED_BY`, `ENOLA_PUBLISHES`, `ENOLA_SUBSCRIBES`, `ENOLA_EXERCISES`, `ENOLA_NAMES`; unknown kinds become `ENOLA_RELATION {kind}`. With `target_id`: to the `:EnolaFact` (`resolved: true`). Without: to the `:EnolaRef` (`resolved: false`). A `target_id` with no fact in the snapshot is an artifact error (none seen in Phase 0) |
 | `ENOLA_MATCHES_ROUTE` | client route → server route by `matched_routes[].id` | `confidence` (`verified` \| `probable`); `confidences` list if records disagree. An entry without an `id` is kept in `props_json` only |
 | `ENOLA_CALLER` | client route → symbol by `props.caller_id` | Absent where the extractor writes no caller (e.g. Go) |
@@ -156,7 +156,7 @@ can be pruned.
 2. **Resolve the source**: `SOURCE` (absent means the working directory) is canonicalized, classified as directory, config file, or snapshot dir (`--snapshot`), and `source_key` is computed.
 3. **Prepare**: generate the snapshot (Phase 3) or open it. Validate and project it into rows in memory (Phase 1).
 4. **Replay check**: look up `EnolaSnapshot {snapshot_key}`. If it exists with the same digest, make sure `ENOLA_LATEST` points to it, prune (step 9), report the replay, and exit. A different digest is an error.
-5. **Schema**: `update_schema` with `IF NOT EXISTS` constraints on `EnolaSource.source_key`, `EnolaSnapshot.snapshot_key`, `EnolaFact (snapshot_key, enola_id)` and `EnolaRef (snapshot_key, target)`.
+5. **Schema**: `update_schema` with `IF NOT EXISTS` unique constraints on `EnolaSource.source_key`, `EnolaSnapshot.snapshot_key`, `EnolaFact.fact_key` and `EnolaRef.ref_key`, plus range indexes on `snapshot_key` and `source_key` for `EnolaFact` and `EnolaRef` and on `EnolaSnapshot.source_key` (verification and pruning). Single-property keys, because Relate's planner seeks a composite `(snapshot_key, enola_id)` index on its first column only, which every fact of a snapshot shares (found in Phase 2).
 6. **Write**, as `MERGE` calls chunked against the handshake caps, in this order: facts, refs, resolved relations, ref relations, route matches, caller edges. Re-running after a crash resumes and converges.
 7. **Verify**: read back counts scoped by `snapshot_key` (per label and per relationship type) and compare them with the deduplicated prepared rows. A mismatch is a `graph` error, and no marker is written.
 8. **Mark**: one `write_cypher` statement merges `:EnolaSource`, creates `:EnolaSnapshot`, and moves `ENOLA_LATEST`.
@@ -250,7 +250,47 @@ Original Phase 1 scope:
 
 **Gate:** `cargo test` passes offline with no Enola and no Relate.
 
-### Phase 2: Snapshot-mode extension (internal milestone M1)
+### Phase 2: Snapshot-mode extension (internal milestone M1) ✅
+
+Done 2026-11-19. `src/graph.rs` implements run-sequence steps 4–9, and `src/main.rs` steps 1–10 (generation still stubbed).
+There are 59 unit tests, plus **12 integration tests against Relate 1.1.0** (`tests/integration.rs`, `RELATE_BIN`; they skip
+cleanly without it), all passing in 4.3 s. CI gained an `integration` job (Relate v1.1.0 and latest × ubuntu and macOS). README written.
+
+Results and deviations:
+
+- **Keys:** single-property `fact_key` and `ref_key` replace the composite constraints. `EXPLAIN` showed the composite index used only for
+  `snapshot_key = $sk`, which would make every relationship lookup scan the whole snapshot. `{fact_key: $snapshot_key + '/' + row.src}`
+  plans as an exact unique-index seek.
+- **Verified on Relate 1.1.0:**
+  - `SET n += map`, `MERGE … ON CREATE SET`, `datetime()`, and `b:Label` as an expression all work.
+  - The marker statement moves `ENOLA_LATEST` atomically and keeps the first provenance when a snapshot is marked again.
+- **`write_cypher` returns counters, not rows**, so the prune loop reads back remaining counts. It cannot stop early, and it fails
+  instead of spinning if a delete makes no progress.
+- **The host forwards the environment to the child**, so the tests use a test-only failure hook,
+  `ENOLA_TO_GRAPH_TEST_FAIL_AFTER=<n tool calls>`. The host prints the summary on one line, so it is written as sentences.
+- **Integration coverage:**
+  - The golden starters return the exact tuples.
+  - Replay is a no-op.
+  - An injected failure leaves no marker and nothing visible through `LATEST`, and a re-run converges to a fresh import's
+    per-type counts.
+  - A failed new snapshot keeps the previous `LATEST` intact.
+  - Pruning works; `--keep-snapshots` keeps history and still removes orphans.
+  - Identical snapshots from two sources stay isolated, with zero cross-snapshot relationships.
+  - `--source-name` works.
+  - Unrelated `:Person` data survives every operation.
+  - A corrupt digest writes nothing, an empty snapshot gets a marker, and a digest conflict is refused.
+- **Scale** (the relate + relate-web snapshot, 58k facts, 20k refs, 255k relationships):
+
+| Operation | Result |
+| --- | --- |
+| Import | 11.3 s in the child (14 s wall), 361 host calls, 87 MB `.rl` |
+| Peak RSS (sampled) | host 327 MB, child 344 MB |
+| Replay (unchanged) | 0.2 s, 5 host calls |
+| New snapshot + prune of 78k nodes | 9.0 s in the child; **23 s wall**: the host spends ~14 s after the child exits, presumably its final checkpoint |
+
+- Relate "latest" is v1.1.0 today; the CI matrix tests both anyway.
+
+Original Phase 2 scope:
 
 - `package/extension.json`. Implement run sequence steps 1–10 in `graph.rs`, with generation stubbed to "this build has no bundled extractor; use --snapshot".
 - README: install, usage, flag table, starter queries, side effects (none in the checkout for directory mode; member caches and providers for cluster configs; `output.root` tip), and the requirements (Relate ≥ 1.1.0, which itself needs glibc ≥ 2.39 on Linux).

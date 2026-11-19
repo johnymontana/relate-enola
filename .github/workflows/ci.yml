@@ -39,6 +39,40 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.87
       - run: cargo test --all-targets
 
+  integration:
+    name: integration (relate ${{ matrix.relate }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        relate: [v1.1.0, latest]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install relate ${{ matrix.relate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            Linux-X64) asset=relate-linux-amd64 ;;
+            Linux-ARM64) asset=relate-linux-arm64 ;;
+            macOS-ARM64) asset=relate-darwin-arm64 ;;
+            macOS-X64) asset=relate-darwin-amd64 ;;
+          esac
+          tag=${{ matrix.relate }}
+          [ "$tag" = latest ] && tag=$(gh release view -R relatedb/relate --json tagName --jq .tagName)
+          mkdir -p "$RUNNER_TEMP/relate" && cd "$RUNNER_TEMP/relate"
+          gh release download "$tag" -R relatedb/relate -p "$asset" -p SHA256SUMS
+          grep " $asset\$" SHA256SUMS | shasum -a 256 -c -
+          chmod +x "$asset" && mv "$asset" relate
+          ./relate --version
+          echo "RELATE_BIN=$PWD/relate" >> "$GITHUB_ENV"
+      - name: Integration tests against a real relate
+        run: cargo test --test integration
+
   goldens:
     name: golden drift (Enola pinned in enola.lock.toml)
     runs-on: ubuntu-latest

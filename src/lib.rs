@@ -7,6 +7,7 @@
 //! executable uses to talk to the Relate host. None of it touches a database.
 
 pub mod envelope;
+pub mod graph;
 pub mod hex;
 pub mod project;
 pub mod snapshot;
