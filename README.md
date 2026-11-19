@@ -7,8 +7,7 @@ and the HTTP calls resolved *across repositories*. It works by running
 [Enola](https://github.com/enola-labs/enola), bundled inside the extension,
 then importing Enola's snapshot.
 
-> **Status: release candidate.** `v0.1.0-rc.1` is published as a GitHub
-> pre-release for macOS and Linux (x86_64, arm64); v0.1.0 follows (see [PLAN.md](PLAN.md)).
+> **v0.1.0** for macOS and Linux (x86_64, arm64). Decisions and verification: [PLAN.md](PLAN.md).
 
 ## Requirements
 
@@ -18,7 +17,7 @@ then importing Enola's snapshot.
 ## Install
 
 ```sh
-relate extension install enola-to-graph --github johnymontana/relate-enola@v0.1.0-rc.1
+relate extension install enola-to-graph --github johnymontana/relate-enola@v0.1.0
 ```
 
 The first install records the release's commit and asset digest in Relate's
