@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  DO_NOT_TRACK: "1"
 
 jobs:
   test:
@@ -72,6 +73,11 @@ jobs:
           echo "RELATE_BIN=$PWD/relate" >> "$GITHUB_ENV"
       - name: Integration tests against a real relate
         run: cargo test --test integration
+      - name: Fetch the pinned Enola for this runner
+        shell: bash
+        run: scripts/fetch-enola.sh | tail -1 >> "$GITHUB_ENV"
+      - name: Integration tests with bundled Enola (live generation)
+        run: cargo test --features bundled-enola --test integration
 
   goldens:
     name: golden drift (Enola pinned in enola.lock.toml)

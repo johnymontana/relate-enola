@@ -1,8 +1,8 @@
 # enola-to-graph: implementation plan
 
-Status: rev 5 (2026-11-19). **Phase 0 complete (GO)**: findings in
+Status: rev 6 (2026-11-19). **Phase 0 complete (GO)**: findings in
 [`notes/enola-contract.md`](notes/enola-contract.md); revisions R1–R9 folded in.
-**Phases 1 and 2 complete**: results recorded under each phase. Next: Phase 3.
+**Phases 1–3 complete**: results recorded under each phase. Next: Phase 4.
 
 Repository: `github.com/johnymontana/relate-enola` (this directory). Not part of
 `relatedb/relate`. That repo's ADR, docs and release rules do not apply here.
@@ -309,7 +309,47 @@ Original Phase 2 scope:
 
 **Gate:** M1 merged to `main`. No tag (D3).
 
-### Phase 3: Bundled generation
+### Phase 3: Bundled generation ✅
+
+Done 2026-11-19. `src/enola/` (cache, bundle, generate, launcher), `build.rs`, `scripts/fetch-enola.sh`,
+`scripts/bump-enola.sh`, and `tests/fixtures/src/cross-repo` (Enola's example sources, for live tests). That brings the
+suite to **74 unit tests**, plus **13 integration tests in the default build and 16 with `bundled-enola`**, all against Relate 1.1.0.
+The bundled suite was stable across three consecutive runs. CI's integration job now also runs the bundled suite.
+
+**Gate met on macOS arm64 and on Linux arm64** (musl build, Ubuntu 24.04 container), with Enola absent from `PATH`:
+
+- `extension check` never starts Enola: no cache is created.
+- Live generation reproduces the golden `snapshot_id`s exactly: directory mode `9c303fee…`, cluster mode `175d56eb…`.
+  Live and `--snapshot` give identical per-type counts.
+- Directory mode leaves the checkout clean (`git status --ignored` is empty) and never creates the user's `~/.enola`.
+  Enola's state lives in `<cache>/home`.
+- An unchanged re-run is Enola "unchanged" plus a replay. An Enola failure with stale artifacts at the same `--out`
+  imports nothing, quotes Enola's actual error, and leaves `LATEST` alone.
+- A single-repository config file works through the retry without `--out`.
+
+Results and deviations:
+
+- **Enola's summary (`Output:`, `Snapshot unchanged:`) is on stderr**, not stdout; `notes/enola-contract.md` is corrected.
+  `Output:` is the authoritative artifact location, with the computed path as a fallback.
+- **Failure diagnostics** drop Enola's tagged progress lines (`[engine] …`) and timestamps, keeping its errors (last 15 lines).
+- **Single-repo config files** (the Phase 1 open item): resolved by retrying without `--out` on Enola's exact refusal text.
+  No YAML parser was added.
+- **build.rs** refuses `bundled-enola` without `ENOLA_BIN`, or with a binary whose SHA-256 differs from the target's
+  `binary_sha256`. Enola's LICENSE and NOTICE are embedded from `third_party/enola/` (`fetch-enola.sh` checks they match
+  the archive) and written beside the materialized binary.
+- `scripts/bump-enola.sh 0.5.3 --print` reproduces the committed `enola.lock.toml` exactly.
+- **The 10 s handshake deadline under parallel load (new finding)**:
+  - On macOS, the first launch of each *new* executable is scanned. That is about 0.6 s for one, small or large.
+  - Installing the 60 MB bundled package fresh in every parallel test queued about 32 scans and pushed child start-up
+    past Relate's 10 s first-request deadline.
+  - The test harness now installs once per test binary. Real installs pay the scan once. Recorded as a Phase 4 check on
+    slower runners.
+- **Scale, end to end through the extension** (58k-fact cluster): about 19.4 s wall on the first run (Enola about 5 s,
+  import 11.5 s). An unchanged re-run takes 2.3 s wall: Enola's check, re-validating and projecting 45 MB, then a replay.
+  A cheaper replay (hash before parsing and projecting) is a possible later optimization.
+- Bundled executable: 59.7 MB (darwin-arm64, ad-hoc linker-signed) and 58.9 MB (linux-arm64 musl, static).
+
+Original Phase 3 scope:
 
 - `scripts/bump-enola.sh` (D17) updates `enola.lock.toml` and regenerates the goldens.
 - Cargo feature `bundled-enola`. `build.rs` reads `ENOLA_BIN` and `ENOLA_NOTICES`, checks `ENOLA_BIN` against `binary_sha256` for the target, and fails clearly if the feature is on and the inputs are absent. Without the feature, everything builds and tests run with no upstream asset.

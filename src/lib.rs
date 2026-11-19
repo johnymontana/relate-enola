@@ -6,6 +6,7 @@
 //! [`source`] decides source identity, and [`wire`] is the MCP client the
 //! executable uses to talk to the Relate host. None of it touches a database.
 
+pub mod enola;
 pub mod envelope;
 pub mod graph;
 pub mod hex;

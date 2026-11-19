@@ -20,7 +20,7 @@ to install from.
 | 5 | Facts shape | ✅ See [Facts](#facts); several plan assumptions corrected |
 | 6 | Golden tuple frozen | ✅ In `tests/fixtures/GENERATED.md` |
 | 7 | Single-repo mode | ✅ `output.root` keeps everything out of the checkout; repo-local `mcp-arch.yaml` is **not** read with an explicit config; `--no-cluster` is required. See [Generation](#generation) |
-| 8 | "Snapshot unchanged" | ✅ Exit 0, stdout `Snapshot unchanged:`, artifacts untouched and current |
+| 8 | "Snapshot unchanged" | ✅ Exit 0, `Snapshot unchanged:` (on **stderr**; see the Phase 3 correction below), artifacts untouched and current |
 | 9 | Failure behavior | ✅ Exit 1, reason on the last stderr lines, output dir untouched (stale artifacts stay) |
 | 10 | Representative large cluster | ✅ See [Scale](#scale) |
 | S1 | Spike: embed, check, install `--from`, run | ✅ darwin-arm64 (native), darwin-amd64 (Rosetta), linux-arm64 (Ubuntu 24.04 container) |
@@ -140,3 +140,13 @@ correctly named assets (`<name>-<version>-<os>-<arch>.tar.gz`, two members, GitH
 `digest` recorded). `johnymontana/relate-enola` doesn't exist yet. Options: a scratch
 repo with a pre-release of the spike, or defer this leg to the first real pre-release
 in Phase 4.
+
+## Phase 3 corrections (2026-11-19)
+
+- **Enola's summary goes to stderr; stdout is empty.** The `Snapshot complete:` / `Snapshot unchanged:` block, including
+  `Output: <dir>`, is written to stderr after the log lines. (The Phase 0 capture that showed `Snapshot unchanged:` on
+  stdout had merged the streams.) The extension reads `Output:` from stderr as the artifact location.
+- Failure output is dominated by component-tagged progress lines (`YYYY/MM/DD HH:MM:SS [engine] …`). The error itself
+  is an untagged line (`snapshot generation failed for …`), so diagnostics drop tagged lines.
+- A single-repo **config file** given `--out` fails with exit 1 and `--out: names a cluster's directory`. The extension
+  retries without `--out` and reads `Output:`.

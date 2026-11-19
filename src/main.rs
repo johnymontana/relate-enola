@@ -4,9 +4,13 @@
 //! this child is the MCP client and drives the import (PLAN.md *Run
 //! sequence*): handshake, the probe that `relate extension check` stops at,
 //! source resolution, snapshot validation and projection, then the graph
-//! writes in [`enola_to_graph::graph`]. Phase 3 adds bundled generation; until
-//! then only `--snapshot` imports.
+//! writes in [`enola_to_graph::graph`]. Without `--snapshot`, a build with the
+//! `bundled-enola` feature generates the snapshot first (`enola_to_graph::enola`).
 
+use enola_to_graph::enola::bundle;
+use enola_to_graph::enola::cache::Cache;
+use enola_to_graph::enola::generate::{self, Generated};
+use enola_to_graph::enola::{EnolaError, ProcessLauncher};
 use enola_to_graph::envelope::Envelope;
 use enola_to_graph::graph::{self, GraphError, Import, Outcome};
 use enola_to_graph::project::{self, Projection};
@@ -102,15 +106,19 @@ fn run() -> Result<(), Failure> {
         &envelope.source_name,
     )
     .map_err(|e| fail(Stage::Input, e))?;
-    if src.kind != SourceKind::Snapshot {
-        return Err(fail(
-            Stage::Enola,
-            "this build has no bundled Enola; generate a snapshot with enola and import it with --snapshot",
-        ));
-    }
-
-    // 3. Prepare: validate and project.
-    let snap = snapshot::read_dir(&src.path).map_err(|e| fail(Stage::Artifact, e))?;
+    // 3. Prepare: generate (unless --snapshot), validate and project.
+    let (snapshot_dir, generation) = if src.kind == SourceKind::Snapshot {
+        (src.path.clone(), None)
+    } else {
+        let bundled =
+            bundle::bundled().ok_or_else(|| fail(Stage::Enola, EnolaError::NotBundled))?;
+        let cache = Cache::locate().map_err(|e| fail(Stage::Enola, e))?;
+        let bin = bundle::materialize(&bundled, &cache).map_err(|e| fail(Stage::Enola, e))?;
+        let g = generate::generate(&src, &cache, &ProcessLauncher { bin })
+            .map_err(|e| fail(Stage::Enola, e))?;
+        (g.dir.clone(), Some((bundled.version, g)))
+    };
+    let snap = snapshot::read_dir(&snapshot_dir).map_err(|e| fail(Stage::Artifact, e))?;
     let projection = project::project(&snap.records).map_err(|e| fail(Stage::Artifact, e))?;
     let snapshot_key = source::snapshot_key(&src.key, &snap.receipt.snapshot_id);
 
@@ -128,17 +136,33 @@ fn run() -> Result<(), Failure> {
     // 10. Summary.
     client
         .report_output(
-            &summary(&src, &snap, &projection, &outcome),
+            &summary(&src, &snap, &projection, &outcome, generation.as_ref()),
             &graph::starters(),
         )
         .map_err(|e| fail(Stage::Graph, e))?;
     Ok(())
 }
 
-fn summary(src: &Source, snap: &Snapshot, p: &Projection, o: &Outcome) -> String {
+fn summary(
+    src: &Source,
+    snap: &Snapshot,
+    p: &Projection,
+    o: &Outcome,
+    generation: Option<&(&str, Generated)>,
+) -> String {
     let r = &snap.receipt;
     let s = &p.stats;
     let mut lines = Vec::new();
+    if let Some((version, g)) = generation {
+        lines.push(format!(
+            "{NAME}: bundled Enola {version} {}",
+            if g.unchanged {
+                "found nothing changed since its last run"
+            } else {
+                "generated a snapshot"
+            }
+        ));
+    }
     let what = if o.replay {
         "already imported (replay: nothing rewritten; it is the latest for this source)".to_string()
     } else if s.distinct_facts == 0 {

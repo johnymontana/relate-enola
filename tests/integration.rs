@@ -1,64 +1,114 @@
-//! Integration tests against a real `relate` binary (PLAN.md Phase 2).
+//! Integration tests against a real `relate` binary (PLAN.md Phases 2–3).
 //!
 //! Set `RELATE_BIN` to a Relate executable (≥ 1.1.0) to run them; CI does.
 //! Without it every test prints a skip notice and passes, so the ordinary
-//! offline `cargo test` stays independent of Relate.
+//! offline `cargo test` stays independent of Relate. Live-generation tests
+//! (module `live`) also need `--features bundled-enola` (with `ENOLA_BIN`).
 //!
-//! Each test gets its own temporary config dir (the extension is installed
-//! there with `--from`), home, sources and stores. Nothing touches the
-//! user's real Relate configuration.
+//! The extension is installed **once** per test binary, into a shared
+//! config dir and `HOME` under `CARGO_TARGET_TMPDIR`. Installing a fresh
+//! 60 MB executable per test made macOS scan dozens of new binaries at once,
+//! which delayed child start-up past the host's 10 s handshake deadline
+//! (Phase 3 finding). Each test still gets its own sources and stores.
+//! Nothing touches the user's real Relate configuration or home.
 
 use enola_to_graph::hex;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 const CROSS: &str = "cross-repo-v0.5.3";
 const ORDERS: &str = "orders-api-v0.5.3";
 const CROSS_ID: &str = "sha256:175d56ebd9c60d648ee400894e51c0d2c3beafd3f6c72c5646ee682f834f4eda";
 const ORDERS_ID: &str = "sha256:9c303fee5dc65c47bdda3403009d9d6979c1c945b7718ed78ecb0d64a52dae8b";
 
+/// The installed extension, shared by every test in this binary.
+struct Shared {
+    relate: PathBuf,
+    dir: PathBuf,
+}
+
+static SHARED: OnceLock<Option<Shared>> = OnceLock::new();
+
 struct Harness {
     _tmp: tempfile::TempDir,
     root: PathBuf,
-    relate: PathBuf,
+    shared: &'static Shared,
 }
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+fn text(out: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+fn base_cmd(relate: &Path, shared: &Path) -> Command {
+    let mut c = Command::new(relate);
+    c.env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", shared.join("home"))
+        .env("XDG_CONFIG_HOME", shared.join("cfg"))
+        .env("DO_NOT_TRACK", "1");
+    c
+}
+
+fn install_once() -> Option<&'static Shared> {
+    SHARED
+        .get_or_init(|| {
+            let relate = PathBuf::from(std::env::var_os("RELATE_BIN")?);
+            let flavor = if cfg!(feature = "bundled-enola") {
+                "bundled"
+            } else {
+                "default"
+            };
+            let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("integration-{flavor}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            for d in ["pkg", "cfg", "home"] {
+                std::fs::create_dir_all(dir.join(d)).unwrap();
+            }
+            let dir = std::fs::canonicalize(&dir).unwrap();
+            let pkg = dir.join("pkg");
+            std::fs::copy(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("package/extension.json"),
+                pkg.join("extension.json"),
+            )
+            .unwrap();
+            std::fs::copy(
+                env!("CARGO_BIN_EXE_enola-to-graph"),
+                pkg.join("enola-to-graph"),
+            )
+            .unwrap();
+            let out = base_cmd(&relate, &dir)
+                .args(["extension", "install", "enola-to-graph", "--from"])
+                .arg(&pkg)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "install failed: {}", text(&out));
+            Some(Shared { relate, dir })
+        })
+        .as_ref()
+}
+
 fn harness() -> Option<Harness> {
-    let relate = PathBuf::from(std::env::var_os("RELATE_BIN")?);
+    let shared = install_once()?;
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap();
-    let pkg = root.join("pkg");
-    for d in ["pkg", "cfg", "home", "db", "src"] {
+    for d in ["db", "src"] {
         std::fs::create_dir_all(root.join(d)).unwrap();
     }
-    std::fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("package/extension.json"),
-        pkg.join("extension.json"),
-    )
-    .unwrap();
-    std::fs::copy(
-        env!("CARGO_BIN_EXE_enola-to-graph"),
-        pkg.join("enola-to-graph"),
-    )
-    .unwrap();
-    let h = Harness {
+    Some(Harness {
         _tmp: tmp,
         root,
-        relate,
-    };
-    let out = h
-        .cmd()
-        .args(["extension", "install", "enola-to-graph", "--from"])
-        .arg(&pkg)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "install failed: {}", text(&out));
-    Some(h)
+        shared,
+    })
 }
 
 macro_rules! harness {
@@ -73,23 +123,20 @@ macro_rules! harness {
     };
 }
 
-fn text(out: &Output) -> String {
-    format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    )
-}
-
 impl Harness {
     fn cmd(&self) -> Command {
-        let mut c = Command::new(&self.relate);
-        c.env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .env("HOME", self.root.join("home"))
-            .env("XDG_CONFIG_HOME", self.root.join("cfg"))
-            .current_dir(&self.root);
+        let mut c = base_cmd(&self.shared.relate, &self.shared.dir);
+        c.current_dir(&self.root);
         c
+    }
+
+    /// The `HOME` every relate (and so every extension child) runs with.
+    fn home(&self) -> PathBuf {
+        self.shared.dir.join("home")
+    }
+
+    fn pkg(&self) -> PathBuf {
+        self.shared.dir.join("pkg")
     }
 
     fn db(&self, name: &str) -> PathBuf {
@@ -206,7 +253,7 @@ fn extension_check_passes_without_preparing_anything() {
     let out = h
         .cmd()
         .args(["extension", "check"])
-        .arg(h.root.join("pkg"))
+        .arg(h.pkg())
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", text(&out));
@@ -526,4 +573,199 @@ fn a_different_snapshot_under_an_imported_id_is_refused() {
         "{t}"
     );
     assert_eq!((h.n(&db, FACTS), h.n(&db, SNAPSHOTS)), (10, 1));
+}
+
+// --- Generation (Phase 3) -----------------------------------------------------
+
+impl Harness {
+    /// `relate run enola-to-graph <source> -d <db> [extra]` (no --snapshot).
+    fn generate(&self, source: &Path, db: &Path, extra: &[&str]) -> Output {
+        self.cmd()
+            .args(["run", "enola-to-graph"])
+            .arg(source)
+            .arg("-d")
+            .arg(db)
+            .args(extra)
+            .output()
+            .unwrap()
+    }
+}
+
+#[cfg(not(feature = "bundled-enola"))]
+#[test]
+fn generation_without_a_bundled_enola_is_refused_clearly() {
+    let h = harness!();
+    let (src, db) = (h.src("repo"), h.db("nogen"));
+    let out = h.generate(&src, &db, &[]);
+    assert!(!out.status.success());
+    let t = text(&out);
+    assert!(t.contains("[enola]") && t.contains("--snapshot"), "{t}");
+    assert!(!h.home().join(".enola").exists(), "nothing ran Enola");
+}
+
+#[cfg(feature = "bundled-enola")]
+mod live {
+    use super::*;
+
+    fn sources() -> PathBuf {
+        fixtures().join("src/cross-repo")
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            let dest = to.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_dir(&e.path(), &dest);
+            } else {
+                std::fs::copy(e.path(), dest).unwrap();
+            }
+        }
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.email=fixture@example.com",
+                "-c",
+                "user.name=fixture",
+            ])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", text(&out));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// The orders-api fixture as a standalone git repository.
+    fn orders_repo(h: &Harness) -> PathBuf {
+        let repo = h.src("orders-api");
+        copy_dir(&sources().join("api"), &repo);
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-qm", "fixture"]);
+        git(
+            &repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example-org/orders-api.git",
+            ],
+        );
+        repo
+    }
+
+    fn snapshot_ids(h: &Harness, db: &Path) -> Vec<String> {
+        h.query(
+            db,
+            "MATCH (:EnolaSource)-[:ENOLA_LATEST]->(s) RETURN s.snapshot_id AS id ORDER BY id",
+        )
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect()
+    }
+
+    #[test]
+    fn directory_mode_leaves_the_checkout_and_home_untouched() {
+        let h = harness!();
+        let (repo, db) = (orders_repo(&h), h.db("dir"));
+        let out = h.generate(&repo, &db, &[]);
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(
+            text(&out).contains("bundled Enola 0.5.3 generated a snapshot"),
+            "{}",
+            text(&out)
+        );
+        assert_eq!(
+            snapshot_ids(&h, &db),
+            [ORDERS_ID],
+            "live generation equals the golden snapshot"
+        );
+        assert_eq!(
+            git(&repo, &["status", "--porcelain", "--ignored"]),
+            "",
+            "the checkout is untouched"
+        );
+        assert!(
+            !h.home().join(".enola").exists(),
+            "the user's ~/.enola is untouched"
+        );
+
+        let again = h.generate(&repo, &db, &[]);
+        assert!(again.status.success());
+        let t = text(&again);
+        assert!(
+            t.contains("found nothing changed") && t.contains("already imported"),
+            "{t}"
+        );
+    }
+
+    #[test]
+    fn cluster_mode_matches_the_golden_snapshot_import() {
+        let h = harness!();
+        let (cluster, live_db, golden_db) = (h.src("cross"), h.db("live"), h.db("golden"));
+        copy_dir(&sources(), &cluster);
+        let out = h.generate(&cluster.join("cluster.yaml"), &live_db, &[]);
+        assert!(out.status.success(), "{}", text(&out));
+        assert_eq!(snapshot_ids(&h, &live_db), [CROSS_ID]);
+        let golden = h.src("golden");
+        copy_fixture(CROSS, &golden);
+        h.import_ok(&golden, &golden_db, &[]);
+        assert_eq!(
+            h.query(&live_db, BY_TYPE),
+            h.query(&golden_db, BY_TYPE),
+            "live == --snapshot"
+        );
+        assert!(!h.home().join(".enola").exists());
+    }
+
+    #[test]
+    fn an_enola_failure_imports_nothing_despite_stale_artifacts() {
+        let h = harness!();
+        let (cluster, db) = (h.src("cross"), h.db("fail"));
+        copy_dir(&sources(), &cluster);
+        let config = cluster.join("cluster.yaml");
+        assert!(h.generate(&config, &db, &[]).status.success());
+        // Same source, same --out, so the previous artifacts are still on disk.
+        std::fs::write(&config, "repos:\n  - api\n  - web\n  - missing-member\n").unwrap();
+        let out = h.generate(&config, &db, &[]);
+        assert!(!out.status.success());
+        let t = text(&out);
+        assert!(
+            t.contains("[enola]")
+                && t.contains("missing-member")
+                && t.contains("nothing was imported"),
+            "{t}"
+        );
+        assert!(!t.contains("[engine]"), "progress noise is filtered: {t}");
+        assert_eq!(
+            snapshot_ids(&h, &db),
+            [CROSS_ID],
+            "the previous snapshot stays latest"
+        );
+    }
+
+    #[test]
+    fn a_single_repository_config_file_is_generated_without_out() {
+        let h = harness!();
+        let (repo, db) = (orders_repo(&h), h.db("single"));
+        let config = h.root.join("src/single.yaml");
+        std::fs::write(
+            &config,
+            format!(
+                "repo: {:?}\nhistory:\n  enabled: false\n",
+                repo.to_str().unwrap()
+            ),
+        )
+        .unwrap();
+        let out = h.generate(&config, &db, &[]);
+        assert!(out.status.success(), "{}", text(&out));
+        assert_eq!(snapshot_ids(&h, &db), [ORDERS_ID]);
+        // The user's own config writes into its repository, as plain Enola would.
+        assert!(repo.join(".enola/receipt.json").is_file());
+    }
 }
