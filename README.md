@@ -7,9 +7,8 @@ and the HTTP calls resolved *across repositories*. It works by running
 [Enola](https://github.com/enola-labs/enola), bundled inside the extension,
 then importing Enola's snapshot.
 
-> **Status: pre-release.** Generation with the bundled Enola and `--snapshot`
-> imports both work from a local build. The `--github` release arrives with
-> v0.1.0 (see [PLAN.md](PLAN.md)).
+> **Status: release candidate.** `v0.1.0-rc.1` is published as a GitHub
+> pre-release for macOS and Linux (x86_64, arm64); v0.1.0 follows (see [PLAN.md](PLAN.md)).
 
 ## Requirements
 
@@ -18,13 +17,14 @@ then importing Enola's snapshot.
 
 ## Install
 
-From v0.1.0:
-
 ```sh
-relate extension install enola-to-graph --github johnymontana/relate-enola@v0.1.0
+relate extension install enola-to-graph --github johnymontana/relate-enola@v0.1.0-rc.1
 ```
 
-Until then, build with the bundled Enola from a checkout:
+The first install records the release's commit and asset digest in Relate's
+trust store; a tag that later points elsewhere is refused.
+
+Or build with the bundled Enola from a checkout:
 
 ```sh
 export $(scripts/fetch-enola.sh | tail -1)        # downloads + verifies the pinned Enola
@@ -127,6 +127,31 @@ RETURN c.repo, c.repo_file, c.line, c.method, c.name, c.unmatched_reason LIMIT 5
 MATCH (:EnolaSource)-[:ENOLA_LATEST]->(s:EnolaSnapshot)
 MATCH (f:EnolaFact {snapshot_key: s.snapshot_key})-[:ENOLA_CALLS]->(r:EnolaRef)
 RETURN r.target, count(DISTINCT f) AS callers ORDER BY callers DESC LIMIT 25
+```
+
+## Enrich with git history
+
+Relate's first-party [`git-to-graph`](https://relatedb.ai) imports commits
+into the same store. With git-to-graph 0.14, file paths are stored as the
+directory argument joined with the repo path, so run it as `.` from the
+repository root and join on `'./' + repo_file`. This works for one repository
+per store: git-to-graph's `File` nodes carry no repository name.
+
+```sh
+cd orders-api
+relate extension install git-to-graph
+relate run git-to-graph . -d ../arch.rl
+relate run enola-to-graph . -d ../arch.rl
+```
+
+```cypher
+// Which commits touched the code that serves GET /api/v2/orders/{id}?
+MATCH (:EnolaSource {source_kind: 'repo'})-[:ENOLA_LATEST]->(s:EnolaSnapshot)
+MATCH (r:EnolaFact {snapshot_key: s.snapshot_key, kind: 'route', name: '/api/v2/orders/{id}'})
+      -[:ENOLA_HANDLED_BY]->(h:EnolaFact)
+MATCH (c:Commit)-[:TOUCHED]->(:File {path: './' + h.repo_file})
+RETURN h.name AS handler, h.repo_file AS file, c.sha, c.subject
+ORDER BY c.authored_at DESC
 ```
 
 ## Good to know

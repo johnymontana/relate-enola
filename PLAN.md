@@ -1,8 +1,8 @@
 # enola-to-graph: implementation plan
 
-Status: rev 6 (2026-11-19). **Phase 0 complete (GO)**: findings in
+Status: rev 7 (2026-11-19). **Phase 0 complete (GO)**: findings in
 [`notes/enola-contract.md`](notes/enola-contract.md); revisions R1–R9 folded in.
-**Phases 1–3 complete**: results recorded under each phase. Next: Phase 4.
+**Phases 1–3 complete; Phase 4 through `v0.1.0-rc.1`**: results recorded under each phase. Remaining: make the repo public, enable immutable releases, tag v0.1.0.
 
 Repository: `github.com/johnymontana/relate-enola` (this directory). Not part of
 `relatedb/relate`. That repo's ADR, docs and release rules do not apply here.
@@ -363,7 +363,53 @@ Original Phase 3 scope:
 
 **Gate:** a local `bundled-enola` build runs `relate run enola-to-graph` on a real repo and on the cross-repo fixture with Enola absent from `PATH`, and neither the checkout nor `~/.enola` changes.
 
-### Phase 4: Release pipeline, proof, and v0.1.0
+### Phase 4: Release pipeline, proof, and v0.1.0 (through rc.1 ✅)
+
+Done 2026-11-19 up to the release candidate. **`v0.1.0-rc.1` is published** (pre-release) at
+`github.com/johnymontana/relate-enola`. The repo is **private** for now.
+
+- **CI** (`ci.yml`) is green on GitHub: tests on Ubuntu and macOS, MSRV 1.87, golden drift, and integration (default plus
+  bundled live generation) × Relate v1.1.0/latest × Ubuntu/macOS. Fixes found by running it there:
+  - The YAML step name `Test (offline: …)` was invalid. Actions are now pinned to commit SHAs (Semgrep), and
+    `.github/actionlint.yaml` declares the `macos-15-intel` label.
+  - `regen-goldens.sh`'s cleanup tripped over root-owned files from Docker on Linux; it now `chown`s them back and keeps
+    its own exit status.
+- **`release.yml`** (tag `v*`):
+  - Checks that the versions agree.
+  - Builds 4 targets natively with `--locked --features bundled-enola` (musl on Linux); darwin builds are ad-hoc signed
+    and verified.
+  - **Smoke-tests each package on its own runner** with `scripts/smoke.sh --from`.
+  - Packs ustar tarballs with exactly `extension.json` and `enola-to-graph` (fixed owner and mtime), plus `SHA256SUMS`.
+  - Publishes via draft (compatible with immutable releases) and calls `verify-release.yml`.
+  - rc.1 assets are 13–14 MiB each, with GitHub `sha256` digests recorded.
+- **`verify-release.yml`** (reusable; also manual) installs the published release with
+  `relate extension install enola-to-graph --github johnymontana/relate-enola@<tag>`. **All 8 jobs passed for rc.1**:
+  4 runners (ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-latest) × Relate v1.1.0/latest. Each records the
+  trust-store pin, and on Linux **every step after install runs under `sudo unshare --net`**. It uses `GITHUB_TOKEN`
+  only because the repo is private.
+  (A release created by `GITHUB_TOKEN` triggers no other workflow, hence `workflow_call` rather than `release: published`.)
+- **Release gates**:
+
+| Check | Result |
+| --- | --- |
+| `--github` install | ✅ 4 platforms × 2 Relate versions in CI, plus locally on macOS arm64. The pin is recorded `{repo, tag, commit, assetSha256}`; a reinstall of the same pin works; **a drifted pin is refused before any fetch** (simulated by editing the isolated trust store, never by moving a tag) |
+| Clean offline run | ✅ Linux legs: generation, re-run and import with no network. macOS has no equivalent sandbox in CI; covered by the install-then-run smoke |
+| Evidence | ✅ Golden snapshot ids from live generation, the golden tuple (`getOrder`, `probable`), and the unmatched call (integration tests) |
+| Lifecycle | ✅ Integration tests (Phase 2), run against both Relate versions in CI |
+| Side effects | ✅ Checkout clean and `~/.enola` absent: smoke test on every platform, live integration tests |
+| Failure | ✅ Integration tests: Enola failure with stale artifacts, corrupt digest, mid-import host failure |
+| Scale | ✅ The **release artifact** on the 58k-fact cluster: 19.8 s first run (Enola about 5 s, import 11.4 s), 2.3 s unchanged re-run, 86 MB `.rl`; peak RSS host 327 MB, child 344 MB (Phase 2 sampling) |
+
+- **Git enrichment demo (D4)** works. Run `git-to-graph` as `.` from the repo root, then join `(:File {path: './' + h.repo_file})`;
+  the commits returned for `getOrder` match `git log -- server.go` exactly. Finding: git-to-graph 0.14 stores paths as
+  `<DIR argument>/<repo path>` (`./server.go`, or `orders-api/server.go` when run from the parent), so the join must use
+  that prefix. Documented in the README.
+- **Remaining for v0.1.0** (user decisions):
+  - Make the repository public; `--github` installs without a token need it.
+  - Enable immutable releases (currently `enabled: false`).
+  - Bump to `0.1.0` and tag `v0.1.0`.
+
+Original Phase 4 scope:
 
 - `release.yml`, triggered by a `v*` tag:
   - Check that the tag, `Cargo.toml` and `extension.json` versions match.
