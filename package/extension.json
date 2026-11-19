@@ -1,0 +1,16 @@
+{
+  "kind": "command",
+  "name": "enola-to-graph",
+  "version": "0.1.0",
+  "protocol": "2025-06-18",
+  "flags": [
+    {"kind": "boolean", "name": "snapshot", "default": false},
+    {"kind": "string", "name": "source-name", "default": ""},
+    {"kind": "boolean", "name": "keep-snapshots", "default": false}
+  ],
+  "positional": {"name": "SOURCE"},
+  "requires-fresh-store": false,
+  "commit": "per-batch",
+  "executable": "enola-to-graph",
+  "hidden": false
+}

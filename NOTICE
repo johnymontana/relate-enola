@@ -1,0 +1,18 @@
+relate-enola (enola-to-graph)
+Copyright 2026 The relate-enola Authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+
+Release builds of enola-to-graph embed an unmodified binary of enola
+(https://github.com/enola-labs/enola), at the version pinned in enola.lock.toml.
+
+enola
+Copyright (c) Dejan Menges
+Licensed under the Apache License, Version 2.0.
+
+enola's own license and notices, including the third-party software it vendors
+(the tree-sitter runtime and grammars, MIT), are reproduced verbatim in
+third_party/enola/LICENSE and third_party/enola/NOTICE, and are compiled into
+release builds alongside this notice.

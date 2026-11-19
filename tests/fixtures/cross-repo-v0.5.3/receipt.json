@@ -1,0 +1,96 @@
+{
+  "snapshot_id": "sha256:175d56ebd9c60d648ee400894e51c0d2c3beafd3f6c72c5646ee682f834f4eda",
+  "format_version": 1,
+  "enola_version": "0.5.3",
+  "extractor_version": "v650",
+  "generated_at": "2026-11-19T19:45:30Z",
+  "duration": "",
+  "repo_path": "",
+  "extractors": [
+    "go",
+    "manifests"
+  ],
+  "explainers": [
+    "cycles",
+    "layers",
+    "crossrepo",
+    "coverage",
+    "unused-routes",
+    "domain",
+    "query-loops",
+    "dead-methods",
+    "entry-points",
+    "messaging-coverage",
+    "god-class",
+    "hotspots",
+    "dependency-depth",
+    "exported-surface",
+    "complexity-outliers",
+    "intent",
+    "constraints",
+    "vendored-candidates",
+    "import-closure",
+    "package-metrics",
+    "dead-code",
+    "performance",
+    "packwerk",
+    "final-inheritance"
+  ],
+  "renderers": [
+    "llm_context",
+    "flows",
+    "docs"
+  ],
+  "config_hash": "sha256:0f67a3f7d2a43702071c35dbd9fd348b26e11b8d896fdbc0a9c2a3846c8471ba",
+  "ignore_glob_hash": "sha256:83dbf7e109a97f4fbe4c6255c5ea1648b57ede0e31e953295664e95171114a16",
+  "output_hashes": {
+    "docs.jsonl": "sha256:5c0109fa739abcb07c7f38d20fff6a634f9a4268304171315068969349f59f7a",
+    "facts.jsonl": "sha256:5e230ea16edc9f5e851b78d7e14af463ccd2bd4fc95b8bcba2922bade50a7696",
+    "flows.json": "sha256:e4f2de81372461a3b6ffc4ec5ed3dac491468806ce1b626989c5ff8e6fa31ef6",
+    "insights.json": "sha256:cd0933a8d991bf749b8cf17af3bb21fcc93f47e94d3b3c1cf54e567035223d16",
+    "llm_context.md": "sha256:875386d5ee280780ca0b8ea2b45a8154bba576174ac8b6b1c64b7ca596223c55"
+  },
+  "fact_count": 20,
+  "insight_count": 5,
+  "quality": {
+    "files_seen": 5,
+    "files_parsed": 3,
+    "files_skipped": 0,
+    "dirs_skipped": 0,
+    "parse_errors": 0,
+    "heuristic_insights": 4,
+    "coverage": {
+      "services_total": 2,
+      "coverage_gaps": 0,
+      "unresolved_edges": 1
+    }
+  },
+  "members": [
+    {
+      "repo": "api",
+      "repo_path": "/fixture/src/cross-repo/api",
+      "extractors": [
+        "go",
+        "manifests"
+      ],
+      "files_seen": 3,
+      "files_parsed": 2,
+      "files_skipped": 0,
+      "dirs_skipped": 0,
+      "parse_errors": 0
+    },
+    {
+      "repo": "web",
+      "repo_path": "/fixture/src/cross-repo/web",
+      "extractors": [
+        "go",
+        "manifests"
+      ],
+      "files_seen": 2,
+      "files_parsed": 1,
+      "files_skipped": 0,
+      "dirs_skipped": 0,
+      "parse_errors": 0
+    }
+  ]
+}

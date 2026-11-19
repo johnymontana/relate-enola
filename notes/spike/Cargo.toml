@@ -1,0 +1,12 @@
+[package]
+name = "enola-spike"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+strip = true

@@ -1,0 +1,38 @@
+[package]
+name = "enola-to-graph"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "Apache-2.0"
+description = "Relate command extension: turn Enola architecture snapshots into a persistent Relate graph"
+repository = "https://github.com/johnymontana/relate-enola"
+publish = false
+
+[lib]
+name = "enola_to_graph"
+path = "src/lib.rs"
+
+[[bin]]
+name = "enola-to-graph"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# stdout is the MCP protocol channel; nothing else may write to it.
+print_stdout = "deny"
+dbg_macro = "deny"

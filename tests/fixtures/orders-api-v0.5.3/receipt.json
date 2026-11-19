@@ -1,0 +1,85 @@
+{
+  "snapshot_id": "sha256:9c303fee5dc65c47bdda3403009d9d6979c1c945b7718ed78ecb0d64a52dae8b",
+  "format_version": 1,
+  "enola_version": "0.5.3",
+  "extractor_version": "v650",
+  "generated_at": "2026-11-19T19:45:30Z",
+  "duration": "26.342625ms",
+  "repo_path": "/fixture/src/orders-api",
+  "git": {
+    "ref": "main",
+    "commit": "e39d9b12777f085121a4d1a309679f39322e54e9",
+    "dirty": false,
+    "remote": "github.com/example-org/orders-api"
+  },
+  "extractors": [
+    "go",
+    "manifests"
+  ],
+  "explainers": [
+    "cycles",
+    "layers",
+    "crossrepo",
+    "coverage",
+    "unused-routes",
+    "domain",
+    "query-loops",
+    "dead-methods",
+    "entry-points",
+    "messaging-coverage",
+    "god-class",
+    "hotspots",
+    "dependency-depth",
+    "exported-surface",
+    "complexity-outliers",
+    "intent",
+    "constraints",
+    "vendored-candidates",
+    "import-closure",
+    "package-metrics",
+    "dead-code",
+    "performance",
+    "packwerk",
+    "final-inheritance"
+  ],
+  "renderers": [
+    "llm_context",
+    "flows",
+    "docs"
+  ],
+  "config_hash": "sha256:0f67a3f7d2a43702071c35dbd9fd348b26e11b8d896fdbc0a9c2a3846c8471ba",
+  "ignore_glob_hash": "sha256:83dbf7e109a97f4fbe4c6255c5ea1648b57ede0e31e953295664e95171114a16",
+  "output_hashes": {
+    "docs.jsonl": "sha256:c8987ff7f464e3cf17c75d81efefdc4349086827a3ba78e8ad714f14a226f212",
+    "facts.jsonl": "sha256:9f9c3184b8c2f00a188f595bdb37af5694a1357381c5bc2ed7787566028496f5",
+    "flows.json": "sha256:b1939067ada953fe78e60398e2a4a051ddd40b9a15e239e809a612fcf2a95703",
+    "insights.json": "sha256:350c2f45116bffe1d3df036122b198b6c472b05ed2655d2fa6ef708263f79267",
+    "llm_context.md": "sha256:f745901144ad7fd8646b802cfa6dafa5fd2e91c105342c123f72946466981be6"
+  },
+  "fact_count": 10,
+  "insight_count": 1,
+  "quality": {
+    "files_seen": 3,
+    "files_parsed": 2,
+    "files_skipped": 0,
+    "dirs_skipped": 1,
+    "skipped_sample": [
+      ".git/ (glob: **/.git/**)"
+    ],
+    "parse_errors": 0,
+    "heuristic_insights": 0,
+    "census": {
+      "files_walked": 3,
+      "parsed": 2,
+      "excluded_by_ignore": 0,
+      "excluded_by_kind": 0,
+      "skipped_with_cause": 1,
+      "top_skip_causes": [
+        {
+          "cause": "claimed by go, no facts emitted",
+          "count": 1
+        }
+      ]
+    }
+  }
+}

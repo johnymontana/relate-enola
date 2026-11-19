@@ -1,0 +1,12 @@
+{
+  "kind": "command",
+  "name": "enola-spike",
+  "version": "0.0.1",
+  "protocol": "2025-06-18",
+  "flags": [{"kind": "boolean", "name": "snapshot", "default": false}],
+  "positional": {"name": "SOURCE"},
+  "requires-fresh-store": false,
+  "commit": "per-batch",
+  "executable": "enola-spike",
+  "hidden": false
+}
