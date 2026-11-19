@@ -1,8 +1,8 @@
 # enola-to-graph: implementation plan
 
-Status: rev 7 (2026-11-19). **Phase 0 complete (GO)**: findings in
+Status: rev 8 (2026-11-19). **Phase 0 complete (GO)**: findings in
 [`notes/enola-contract.md`](notes/enola-contract.md); revisions R1–R9 folded in.
-**Phases 1–3 complete; Phase 4 through `v0.1.0-rc.1`**: results recorded under each phase. Remaining: make the repo public, enable immutable releases, tag v0.1.0.
+**All phases complete. v0.1.0 shipped** (public, immutable release): results recorded under each phase.
 
 Repository: `github.com/johnymontana/relate-enola` (this directory). Not part of
 `relatedb/relate`. That repo's ADR, docs and release rules do not apply here.
@@ -363,7 +363,7 @@ Original Phase 3 scope:
 
 **Gate:** a local `bundled-enola` build runs `relate run enola-to-graph` on a real repo and on the cross-repo fixture with Enola absent from `PATH`, and neither the checkout nor `~/.enola` changes.
 
-### Phase 4: Release pipeline, proof, and v0.1.0 (through rc.1 ✅)
+### Phase 4: Release pipeline, proof, and v0.1.0 ✅
 
 Done 2026-11-19 up to the release candidate. **`v0.1.0-rc.1` is published** (pre-release) at
 `github.com/johnymontana/relate-enola`. The repo is **private** for now.
@@ -404,10 +404,13 @@ Done 2026-11-19 up to the release candidate. **`v0.1.0-rc.1` is published** (pre
   the commits returned for `getOrder` match `git log -- server.go` exactly. Finding: git-to-graph 0.14 stores paths as
   `<DIR argument>/<repo path>` (`./server.go`, or `orders-api/server.go` when run from the parent), so the join must use
   that prefix. Documented in the README.
-- **Remaining for v0.1.0** (user decisions):
-  - Make the repository public; `--github` installs without a token need it.
-  - Enable immutable releases (currently `enabled: false`).
-  - Bump to `0.1.0` and tag `v0.1.0`.
+- **v0.1.0 shipped 2026-11-19.**
+  - The repository was made public and immutable releases enabled (`enabled: true`).
+  - The `v0.1.0` tag (commit `7c13c08`) ran the full release: 4 builds with native smoke tests, publish, and **8/8
+    `--github` verification jobs**. The release is the repo's *latest*, not a pre-release, and GitHub marks it
+    `immutable: true`.
+  - An **anonymous** `relate extension install enola-to-graph --github johnymontana/relate-enola@v0.1.0` (no token)
+    downloaded straight from the public release URL, recorded the pin, and passed the full smoke test.
 
 Original Phase 4 scope:
 
