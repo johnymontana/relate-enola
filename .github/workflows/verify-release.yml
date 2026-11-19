@@ -1,0 +1,59 @@
+name: Verify release
+
+# Called by release.yml after publishing (a release created with GITHUB_TOKEN
+# triggers no other workflow), or run by hand. Installs the release the way users do —
+# `relate extension install enola-to-graph --github <repo>@<tag>` — on all four
+# platforms, against Relate 1.1.0 and the latest Relate, and run the smoke
+# test. On Linux every step after the install runs without network access.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify (e.g. v0.1.0-rc.1)
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DO_NOT_TRACK: "1"
+
+jobs:
+  verify:
+    name: ${{ matrix.runner }} / relate ${{ matrix.relate }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-latest]
+        relate: [v1.1.0, latest]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install relate ${{ matrix.relate }}
+        shell: bash
+        run: echo "RELATE_BIN=$(scripts/install-relate.sh ${{ matrix.relate }} "$RUNNER_TEMP/relate")" >> "$GITHUB_ENV"
+      - name: Install from GitHub and smoke test (Linux, offline after install)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          # Only needed while the repository is private; harmless when public.
+          GITHUB_TOKEN: ${{ github.token }}
+          SMOKE_OFFLINE: sudo unshare --net --
+        run: scripts/smoke.sh --github "${GITHUB_REPOSITORY}@${TAG}"
+      - name: Install from GitHub and smoke test (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/smoke.sh --github "${GITHUB_REPOSITORY}@${TAG}"

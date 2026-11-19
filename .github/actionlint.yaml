@@ -1,0 +1,4 @@
+# macos-15-intel is a GitHub-hosted label newer than some actionlint releases.
+self-hosted-runner:
+  labels:
+    - macos-15-intel

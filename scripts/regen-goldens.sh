@@ -46,7 +46,8 @@ binary=$(target_field "$target" binary)
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/enola-goldens.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+# Keep the script's own status even if cleanup trips over container-owned files.
+trap 'status=$?; rm -rf "$work" 2>/dev/null || true; exit $status' EXIT
 echo "==> Enola $version ($target) into $work"
 curl -fsSL --proto '=https' -o "$work/enola.tar.gz" "$url"
 actual=$(sha256 "$work/enola.tar.gz")
@@ -85,10 +86,12 @@ printf 'repo: "/fixture/src/orders-api"\noutput:\n  dir: ".enola"\n  root: "/fix
 \$E --generate /tmp/run/enola-to-graph.yaml 2>/fixture/out/orders-api.stderr
 mkdir -p /fixture/out/orders-api
 cp /fixture/root/fixture/src/orders-api/.enola/receipt.json /fixture/root/fixture/src/orders-api/.enola/facts.jsonl /fixture/out/orders-api/
+# Files created in the bind mount belong to root on Linux hosts; hand them back.
+chown -R "\$HOST_UID:\$HOST_GID" /fixture 2>/dev/null || true
 EOF
 
 echo "==> generating in ubuntu:24.04 (linux/$arch)"
-docker run --rm --platform "linux/$arch" \
+docker run --rm --platform "linux/$arch" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
 	-v "$work/fixture:/fixture" -v "$work/enola:/enola:ro" -v "$work/gen.sh:/gen.sh:ro" \
 	ubuntu:24.04 bash -c 'apt-get -qq update >/dev/null && apt-get -qq install -y git >/dev/null 2>&1 && bash /gen.sh'
 

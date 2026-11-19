@@ -1,0 +1,172 @@
+name: Release
+
+# A v* tag builds enola-to-graph with the pinned Enola embedded for four
+# targets, smoke-tests each package natively against a real relate, packs
+# the two-member tarballs relate's --github install expects
+# (enola-to-graph-<version>-<os>-<arch>.tar.gz: extension.json + executable),
+# and publishes a GitHub release. A version with a '-' (v0.1.0-rc.1) is a
+# pre-release. Tags are never moved: relate's trust store pins tag -> commit.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DO_NOT_TRACK: "1"
+
+jobs:
+  version:
+    name: Check versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=${GITHUB_REF_NAME}
+          version=${tag#v}
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          manifest_version=$(python3 -c 'import json; print(json.load(open("package/extension.json"))["version"])')
+          echo "tag=$tag Cargo.toml=$cargo_version extension.json=$manifest_version"
+          [ "$cargo_version" = "$version" ] || { echo "::error::Cargo.toml version $cargo_version does not match tag $tag"; exit 1; }
+          [ "$manifest_version" = "$version" ] || { echo "::error::extension.json version $manifest_version does not match tag $tag"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case $version in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-latest, os: linux, arch: amd64 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm, os: linux, arch: arm64 }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel, os: darwin, arch: amd64 }
+          - { target: aarch64-apple-darwin, runner: macos-latest, os: darwin, arch: arm64 }
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: musl tools
+        if: matrix.os == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Fetch and verify the pinned Enola (${{ matrix.os }}-${{ matrix.arch }})
+        shell: bash
+        run: scripts/fetch-enola.sh ${{ matrix.os }}-${{ matrix.arch }} | tail -1 >> "$GITHUB_ENV"
+      - name: Build with bundled Enola
+        run: cargo build --release --locked --features bundled-enola --target ${{ matrix.target }}
+      - name: Assemble the package directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          cp package/extension.json pkg/
+          cp target/${{ matrix.target }}/release/enola-to-graph pkg/
+          chmod 755 pkg/enola-to-graph
+          file pkg/enola-to-graph
+          ls -l pkg
+      - name: Ad-hoc sign and verify (macOS)
+        if: matrix.os == 'darwin'
+        run: |
+          codesign --force --sign - pkg/enola-to-graph
+          codesign --verify --strict --verbose=2 pkg/enola-to-graph
+          codesign -dv pkg/enola-to-graph 2>&1 | grep -E 'Signature|flags'
+      - name: Install relate (latest)
+        shell: bash
+        run: echo "RELATE_BIN=$(scripts/install-relate.sh latest "$RUNNER_TEMP/relate")" >> "$GITHUB_ENV"
+      - name: Smoke test the package natively
+        shell: bash
+        run: scripts/smoke.sh --from "$PWD/pkg"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pkg-${{ matrix.os }}-${{ matrix.arch }}
+          path: pkg/
+          if-no-files-found: error
+
+  publish:
+    name: Pack and publish
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+      - name: Pack the tarballs (GNU tar, exactly two members)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for d in artifacts/pkg-*; do
+            platform=${d#artifacts/pkg-}
+            chmod 755 "$d/enola-to-graph"   # artifacts do not keep the exec bit
+            chmod 644 "$d/extension.json"
+            tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime='2026-01-01 00:00:00Z' \
+              -C "$d" -czf "dist/enola-to-graph-$VERSION-$platform.tar.gz" extension.json enola-to-graph
+          done
+          for t in dist/*.tar.gz; do
+            members=$(tar -tzf "$t" | tr '\n' ' ')
+            [ "$members" = "extension.json enola-to-graph " ] || { echo "::error::$t has members: $members"; exit 1; }
+            tar -tvzf "$t"
+          done
+          (cd dist && sha256sum -- *.tar.gz | tee SHA256SUMS)
+      - name: Release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          enola=$(sed -n 's/^version = "\(.*\)"/\1/p' enola.lock.toml)
+          {
+            echo "enola-to-graph $VERSION embeds Enola $enola (pinned in enola.lock.toml)."
+            echo
+            echo '```sh'
+            echo "relate extension install enola-to-graph --github ${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}"
+            echo "relate run enola-to-graph . -d ../architecture.rl"
+            echo '```'
+            echo
+            echo "Requires Relate 1.1.0 or newer (on Linux, Relate needs glibc 2.39+). macOS and Linux, x86_64 and arm64."
+            echo
+            echo "macOS: \`relate extension install\` is unaffected by quarantine. If you download a tarball in a browser"
+            echo "and unpack it by hand, run \`xattr -d com.apple.quarantine enola-to-graph\`."
+            echo
+            echo "SHA-256:"
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } > notes.md
+          cat notes.md
+      - name: Publish (draft, upload, then publish; compatible with immutable releases)
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          [ "${{ needs.version.outputs.prerelease }}" = true ] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "enola-to-graph $VERSION" \
+            --notes-file notes.md "${flags[@]}" dist/*.tar.gz dist/SHA256SUMS
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[] | "\(.name) \(.digest)"'
+
+  verify:
+    name: Verify the published release
+    needs: publish
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      tag: ${{ github.ref_name }}
